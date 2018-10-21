@@ -159,7 +159,7 @@ function surface(c::Lattice, filter=abs)
 
     surface(m_range, n_range, map(filter, c.values),
                 xticks=xticks, yticks=yticks,
-                xlabel="m", ylabel="n",
+                xlabel="n", ylabel="m",
                 fill=(true, cgrad(:grays,[0.0,0.1,0.2,0.5,1.0])),
                 legend=:none)
 end
