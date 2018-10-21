@@ -1,7 +1,8 @@
 module Gabor
-import Base:*
+import Base:*,+,-,/
 import Base.size
 using LinearAlgebra
+import Plots.plot
 
 # Exceptions
 struct InvalidFuncDimensions <: Exception
@@ -35,14 +36,17 @@ print(io, "Domain of function being analysed does not match"
 
 struct SynthesiseMismatch <: Exception
 end
-Base.showerror(io::IO, e::AnalyseMismatch) =
+Base.showerror(io::IO, e::SynthesiseMismatch) =
 print(io, "Size of coefficients does not match elementary function dimensions")
+
+struct RankDeficientMatrix <: Exception
+end
+Base.showerror(io::IO, e::RankDeficientMatrix) =
+print(io, "The row rank of the G matrix is less than its number of rows")
 
 
 
 Scalar = Complex{Float64}
-
-periodic(k::Integer, P) = ((k%P)+P)%P
 
 struct Func
     domain::UnitRange{Int64}
@@ -54,8 +58,31 @@ struct Func
         new(domain, values)
     end
 end
-(f::Func)(k::Int)::Scalar = f.values[findfirst(isequal(periodic(k, length(f.domain))), f.domain)]
-*(A::Array{Gabor.Scalar}, f::Func) = Func(f.domain, A*f.values)
+(f::Func)(k::Int)::Scalar = circshift(f.values, f.domain[1]-k)[1]
+*(A, f::Func) = Func(f.domain, A*f.values)
+*(f::Func, A) = Func(f.domain, f.values*A)
++(f::Func, g::Func)::Func = Func(f.domain, g.values+f.values)
+-(f::Func, g::Func)::Func = Func(f.domain, g.values-f.values)
+/(f::Func, div)::Func = Func(f.domain, f.values/div)
+norm(f::Func)::Float64 = sqrt(sum([abs(f(k))^2 for k in f.domain]))
+δ(f::Func, g::Func) = norm((f/norm(f)) - (g/norm(g)))
+plot(f::Func) = plot(f.domain, map(real, f.values),
+                           bar_width=0.2,
+                           seriestype=:bar,
+                           linestyle=:solid,
+                           fillcolor=:black,
+                           legend=false)
+function compute_all(g::Func, M::Integer, N::Integer)
+    L = length(g.domain)
+    ψg = ElemFunc(g, Integer(L/M), Integer(L/N))
+    S = operator(ψg)
+    g̃ = inv(S)*g
+    ψg̃ = ElemFunc(g̃, ψg.timeStep, ψg.freqStep)
+    ψγ = wr_bio(ψg)
+    γ = ψγ.func
+    ψg, S, g̃, ψg̃, γ, ψγ
+end
+
 
 # the shift-modulation operator on funcs
 function ψ(p::Int, q::Int, g::Func)::Func
@@ -84,7 +111,7 @@ dimensions(ψg::ElemFunc) = vcat(map(div -> Int(length(ψg.func.domain)/div), [�
 function operator(ψg::ElemFunc)
     M, N, _ = dimensions(ψg)
     shift_values = [ψg(m, n).values for m in 0:M-1, n in 0:N-1]
-    sum([v*transpose(v) for v in shift_values])
+    sum([v*conj(transpose(v)) for v in shift_values])
 end
 
 netΔ(A, B) = sum([abs(A[i]-B[i]) for i in 1:length(A)])
@@ -126,7 +153,7 @@ end
 function synthesize(ψg::ElemFunc, c::Lattice)
     M, N, _ = dimensions(ψg)
     if (M,N) ≠ size(c)
-        throw(SynthesizeMismatch())
+        throw(SynthesiseMismatch())
     end
     x(k) = sum([c(m,n)*ψg(m,n)(k) for m in 0:M-1, n in 0:N-1])
     domain = ψg.func.domain
@@ -135,29 +162,26 @@ end
 
 # compute Wexler-Raz minimum energy dual
 function wr_bio(ψg::ElemFunc)::ElemFunc
-    L = length(ψg.func.domain)
-    M, N, _ = dimensions(ψg)
-    lattice = [(m,n) for m in 0:M-1 for n in 0:N-1]
-    G = [conj(ψg(m, n)(k)) for (m,n) in lattice, k in ψg.func.domain]
-    μ = vcat(L/(M*N), zeros(Scalar, L-1))
-    γ = Func(ψg.func.domain, G \ μ)
+    M, N, L = dimensions(ψg)
+    lattice = [(m,n) for m in 0:ψg.freqStep-1 for n in 0:ψg.timeStep-1]
+    G = [conj(ψ(m*N, n*M, ψg.func)(k)) for (m,n) in lattice, k in ψg.func.domain]
+    # if rank(G) ≠ ψg.timeStep*ψg.freqStep
+        # throw(RankDeficientMatrix())
+    # end
+    μ = vcat(L/(M*N), zeros(Scalar, ψg.timeStep*ψg.freqStep-1))
+    γ = Func(ψg.func.domain, pinv(G)*μ)
+    ElemFunc(γ, ψg)
+end
+
+function wr_bio(ψg::ElemFunc, w::Int)
+    M, N, L = dimensions(ψg)
+    M′ = floor(w/N) == (w/N) ? Int(w/N)-1 : Int(floor(w/N))
+    lattice = [(m,n) for m in 0:M′ for n in 0:ψg.timeStep-1]
+    G = [conj(ψ(m*N, n*M, ψg.func)(k)) for (m,n) in lattice, k in ψg.func.domain[1:w]]
+    μ = vcat(L/(M*N), zeros(Scalar, (M′+1)*ψg.timeStep-1))
+    γ_values = G \ μ
+    γ = Func(ψg.func.domain, vcat(γ_values, zeros(Scalar, L-w)))
     ElemFunc(γ, ψg)
 end
 
 end
-
-
-domain = 0:11
-L = length(domain)
-
-
-window(k::Integer)::Complex{Float64} = (2^(1/2)/8)^(1/2)*exp(-(2k)^2)
-
-g = Gabor.Func(domain, map(window, domain))
-ψg = Gabor.ElemFunc(g, 1, 12)
-S = Gabor.operator(ψg)
-g̃ = inv(S)*g
-ψg̃ = Gabor.ElemFunc(g̃, ψg.timeStep, ψg.freqStep)
-
-# ψγ = Gabor.wr_bio(ψg)
-# γ = ψγ.func
