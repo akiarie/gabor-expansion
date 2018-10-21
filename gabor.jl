@@ -2,7 +2,9 @@ module Gabor
 import Base:*,+,-,/
 import Base.size
 using LinearAlgebra
+using Plots
 import Plots.plot
+import Plots.surface
 
 # Exceptions
 struct InvalidFuncDimensions <: Exception
@@ -140,6 +142,27 @@ struct Lattice
 end
 (c::Lattice)(m::Int, n::Int) = c.values[m+1, n+1]
 size(c::Lattice) = size(c.values)
+function surface(c::Lattice, filter=abs)
+    M, N = size(c.values)
+    mid_M, mid_N = Int(M/2), Int(N/2)
+    m_range = circshift(0:N-1, mid_N)
+    n_range = circshift(0:M-1, mid_M)
+
+    # determine ticks
+    freqs = [100, 10, 5, 2, 1]
+    levels = [1000, 50, 25, 15, 1]
+    tick_freq(S) = freqs[findfirst(k -> div(S, k) > 0, levels)]
+    x_freq = tick_freq(N)
+    y_freq = tick_freq(M)
+    xticks = (0:x_freq:N-1, -mid_N:x_freq:(mid_N+N))
+    yticks = (0:y_freq:M-1, -mid_M:y_freq:(mid_M+M))
+
+    surface(m_range, n_range, map(filter, c.values),
+                xticks=xticks, yticks=yticks,
+                xlabel="m", ylabel="n",
+                fill=(true, cgrad(:grays,[0.0,0.1,0.2,0.5,1.0])),
+                legend=:none)
+end
 
 function analyse(ψg::ElemFunc, x::Func)
     M, N, _ = dimensions(ψg)
