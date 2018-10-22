@@ -188,9 +188,9 @@ function wr_bio(ψg::ElemFunc)::ElemFunc
     M, N, L = dimensions(ψg)
     lattice = [(m,n) for m in 0:ψg.freqStep-1 for n in 0:ψg.timeStep-1]
     G = [conj(ψ(m*N, n*M, ψg.func)(k)) for (m,n) in lattice, k in ψg.func.domain]
-    # if rank(G) ≠ ψg.timeStep*ψg.freqStep
-        # throw(RankDeficientMatrix())
-    # end
+    if rank(G) ≠ ψg.timeStep*ψg.freqStep
+        throw(RankDeficientMatrix())
+    end
     μ = vcat(L/(M*N), zeros(Scalar, ψg.timeStep*ψg.freqStep-1))
     γ = Func(ψg.func.domain, pinv(G)*μ)
     ElemFunc(γ, ψg)
