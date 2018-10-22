@@ -132,9 +132,11 @@ end
 
 function frame(ψg::ElemFunc)
     S = operator(ψg)
-    γ = inv(S)*ψg.func
-    ψγ = ElemFunc(γ, ψg)
-    biorthogonal(ψg, ψγ)
+    U = cholesky(S).U
+    h̃ = conj(transpose(U)) \ ψg.func.values
+    g̃ = Func(ψg.func.domain, U \ h̃)
+    ψg̃ = ElemFunc(g̃, ψg)
+    biorthogonal(ψg, ψg̃)
 end
 
 struct Lattice
